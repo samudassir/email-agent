@@ -1,0 +1,19 @@
+# Google APIs
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+
+# Google Gemini AI (new SDK)
+google-genai
+
+# Utilities
+python-dotenv
+pydantic
+pydantic-settings
+
+# CLI
+rich
+typer
+
+# Logging
+structlog
