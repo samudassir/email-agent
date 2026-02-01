@@ -386,6 +386,17 @@ Respond with ONLY a JSON array (one object per email):
             
             results = self._parse_batch_response(response.text, emails)
             
+            # Check for suspicious content and track it
+            for email, result in zip(emails, results):
+                suspicious_info = self.tracker.detect_suspicious_content(email)
+                if suspicious_info["is_suspicious"]:
+                    self.tracker.track_suspicious_activity(
+                        email=email,
+                        classification_result=result.importance.value,
+                        confidence=result.confidence,
+                        suspicious_info=suspicious_info
+                    )
+            
             # Track successful batch classification (PII-free)
             latency_ms = (time.time() - start_time) * 1000
             self.tracker.track_batch_classification(

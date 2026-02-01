@@ -479,6 +479,117 @@ class OpikTracker:
         except Exception as e:
             logger.debug("Failed to track LLM call", error=str(e))
     
+    # Patterns that indicate potential prompt injection
+    INJECTION_PATTERNS = [
+        "ignore previous",
+        "ignore all",
+        "disregard instructions",
+        "new instructions",
+        "you are now",
+        "act as",
+        "pretend you",
+        "system override",
+        "admin mode",
+        "classify as important",
+        "mark as important",
+        "do not trash",
+        "don't trash",
+        "[system]",
+        "[admin]",
+    ]
+    
+    def detect_suspicious_content(self, email: Any) -> dict:
+        """
+        Detect potential prompt injection or suspicious patterns in email.
+        
+        Returns dict with:
+            - is_suspicious: bool
+            - patterns_found: list of matched patterns
+            - risk_level: "none", "low", "medium", "high"
+        """
+        subject = getattr(email, 'subject', '') or ''
+        body = getattr(email, 'body_preview', '') or ''
+        content = f"{subject} {body}".lower()
+        
+        patterns_found = []
+        for pattern in self.INJECTION_PATTERNS:
+            if pattern in content:
+                patterns_found.append(pattern)
+        
+        # Determine risk level
+        if len(patterns_found) >= 3:
+            risk_level = "high"
+        elif len(patterns_found) >= 2:
+            risk_level = "medium"
+        elif len(patterns_found) >= 1:
+            risk_level = "low"
+        else:
+            risk_level = "none"
+        
+        return {
+            "is_suspicious": len(patterns_found) > 0,
+            "patterns_found": patterns_found,
+            "risk_level": risk_level,
+            "pattern_count": len(patterns_found)
+        }
+    
+    def track_suspicious_activity(
+        self,
+        email: Any,
+        classification_result: str,
+        confidence: float,
+        suspicious_info: dict
+    ):
+        """
+        Track suspicious activity detected in an email.
+        
+        This helps identify potential prompt injection attempts.
+        """
+        if not _opik_enabled or not suspicious_info.get("is_suspicious"):
+            return
+        
+        try:
+            email_meta = self.scrubber.scrub_email(email)
+            
+            safe_input = {
+                "sender_domain": email_meta.sender_domain,
+                "subject_length": email_meta.subject_length,
+                "body_length": email_meta.body_length,
+            }
+            
+            safe_output = {
+                "risk_level": suspicious_info["risk_level"],
+                "pattern_count": suspicious_info["pattern_count"],
+                "patterns_found": suspicious_info["patterns_found"],
+                "classification_result": classification_result,
+                "confidence": confidence,
+                "possible_injection": suspicious_info["risk_level"] in ["medium", "high"],
+            }
+            
+            opik_client = self._get_opik()
+            if opik_client:
+                trace = opik_client.trace(
+                    name="suspicious_activity",
+                    input=safe_input,
+                    output=safe_output,
+                    tags=["security", f"risk_{suspicious_info['risk_level']}"],
+                    metadata={
+                        "alert_type": "potential_prompt_injection",
+                        "risk_level": suspicious_info["risk_level"],
+                    }
+                )
+                trace.end()
+                
+            logger.warning(
+                "Suspicious content detected",
+                risk_level=suspicious_info["risk_level"],
+                patterns=suspicious_info["patterns_found"],
+                domain=email_meta.sender_domain
+            )
+                
+        except Exception as e:
+            logger.debug("Failed to track suspicious activity", error=str(e))
+    
     def track_security_test(
         self,
         test_name: str,
