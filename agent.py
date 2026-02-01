@@ -358,7 +358,7 @@ def main():
     def run(
         batch_size: int = typer.Option(10, "--batch", "-b", help="Number of emails to process"),
         dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Don't actually trash emails"),
-        older_than: str = typer.Option(None, "--older-than", "-o", help="Only process emails older than (e.g., 1y, 6m, 30d, 2w)"),
+        older_than: str = typer.Option("6m", "--older-than", "-o", help="Only process emails older than (e.g., 1y, 6m, 30d, 2w). Default: 6m"),
     ):
         """Process unread emails and classify them."""
         settings = get_settings()

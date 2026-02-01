@@ -19,7 +19,7 @@ on:
       older_than:
         description: 'Only process emails older than (e.g., 1y, 6m, 30d, 2w)'
         required: false
-        default: ''
+        default: '6m'
 
 jobs:
   process-emails:
@@ -58,10 +58,9 @@ jobs:
           OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
           OPIK_PROJECT: 'email-agent'
         run: |
-          OLDER_THAN_FLAG=""
-          if [ -n "${{ github.event.inputs.older_than }}" ]; then
-            OLDER_THAN_FLAG="--older-than ${{ github.event.inputs.older_than }}"
-          fi
+          # Default to 6 months old if not specified
+          OLDER_THAN="${{ github.event.inputs.older_than || '6m' }}"
+          OLDER_THAN_FLAG="--older-than $OLDER_THAN"
           
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
