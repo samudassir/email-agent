@@ -1,0 +1,22 @@
+{
+  "sender_stats": {
+    "github.com": {
+      "domain": "github.com",
+      "important_count": 4,
+      "not_important_count": 0,
+      "uncertain_count": 4,
+      "corrections": 0,
+      "last_seen": "2026-01-31T22:26:49.666233"
+    },
+    "rs.email.nextdoor.com": {
+      "domain": "rs.email.nextdoor.com",
+      "important_count": 0,
+      "not_important_count": 0,
+      "uncertain_count": 1,
+      "corrections": 0,
+      "last_seen": "2026-01-31T22:26:49.657279"
+    }
+  },
+  "corrections": [],
+  "last_updated": "2026-01-31T22:26:49.666242"
+}

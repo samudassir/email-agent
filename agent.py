@@ -17,6 +17,7 @@ from rich import box
 from config import Settings, get_settings
 from gmail_client import GmailClient, Email
 from classifier import EmailClassifier, ClassificationResult, ImportanceLevel
+from context_store import ContextStore
 
 logger = structlog.get_logger()
 console = Console()
@@ -42,12 +43,21 @@ class EmailAgent:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.gmail = GmailClient(settings)
-        self.classifier = EmailClassifier(settings)
+        self.context_store = ContextStore()
+        self.classifier = EmailClassifier(settings, context_store=self.context_store)
         self.action_log: list[ActionLog] = []
         self.log_file = "agent_actions.json"
         
         # Load previous action log
         self._load_action_log()
+        
+        # Show context summary
+        summary = self.context_store.get_summary()
+        if summary["total_classifications"] > 0:
+            logger.info("Context loaded", 
+                       senders=summary["total_senders_tracked"],
+                       classifications=summary["total_classifications"],
+                       corrections=summary["total_corrections"])
     
     def _load_action_log(self):
         """Load action log from file."""
@@ -85,6 +95,14 @@ class EmailAgent:
         )
         self.action_log.append(log_entry)
         self._save_action_log()
+        
+        # Record classification in context store for learning
+        # (only record actual actions, not dry runs)
+        if action in ["trash", "keep"] and classification.category != "whitelisted":
+            self.context_store.record_classification(
+                sender_email=email.sender_email,
+                classification=classification.importance.value
+            )
     
     def _should_auto_trash(self, classification: ClassificationResult) -> bool:
         """Determine if email should be auto-trashed based on classification."""
@@ -242,13 +260,23 @@ class EmailAgent:
         console.print(Panel(summary, title="📊 Summary", box=box.ROUNDED))
     
     def undo_last_trash(self) -> bool:
-        """Undo the last trash action."""
+        """Undo the last trash action and learn from the correction."""
         # Find last trash action
         for log in reversed(self.action_log):
             if log.action == "trash" and log.success:
                 success = self.gmail.untrash_email(log.email_id)
                 if success:
                     console.print(f"[green]✓ Restored: {log.email_subject}[/green]")
+                    
+                    # Record correction for learning
+                    self.context_store.record_correction(
+                        email_id=log.email_id,
+                        sender_email=log.email_sender,
+                        subject=log.email_subject,
+                        original_classification=log.classification
+                    )
+                    console.print("[blue]📚 Learned from correction - will be more careful with similar emails[/blue]")
+                    
                     return True
                 else:
                     console.print("[red]Failed to restore email[/red]")

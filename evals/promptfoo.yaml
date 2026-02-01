@@ -1,0 +1,210 @@
+# Promptfoo configuration for testing email classification
+# Run: npx promptfoo eval
+
+description: Email Classification Accuracy Tests
+
+prompts:
+  - file://prompt_template.txt
+
+providers:
+  - id: google:gemini-2.5-flash-lite
+    config:
+      temperature: 0.1
+
+defaultTest:
+  assert:
+    - type: is-json
+    - type: javascript
+      value: |
+        const valid = ['important', 'not_important', 'uncertain'];
+        return valid.includes(JSON.parse(output).importance);
+
+tests:
+  # === PROMOTIONAL EMAILS (should be not_important) ===
+  - description: "Promotional - Store sale"
+    vars:
+      email_from: "deals@bestbuy.com"
+      email_subject: "50% OFF Everything This Weekend!"
+      email_body: "Don't miss our biggest sale of the year. Shop now for incredible savings on electronics, appliances, and more!"
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+      - type: javascript
+        value: JSON.parse(output).confidence >= 0.8
+
+  - description: "Promotional - Airline miles"
+    vars:
+      email_from: "noreply@united.com"
+      email_subject: "Your MileagePlus Statement"
+      email_body: "You have 45,000 miles. Book your next adventure today with our special partner offers."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  - description: "Promotional - Coursera course"
+    vars:
+      email_from: "no-reply@coursera.org"
+      email_subject: "New Course: Machine Learning Specialization"
+      email_body: "Enroll now in our top-rated ML course. Limited time discount available."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  # === JOB ALERTS (should be not_important) ===
+  - description: "Job Alert - LinkedIn"
+    vars:
+      email_from: "jobs-noreply@linkedin.com"
+      email_subject: "25 new jobs match your preferences"
+      email_body: "Software Engineer at Google, Senior Developer at Meta, and 23 more jobs you might be interested in."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  - description: "Job Alert - Indeed"
+    vars:
+      email_from: "alert@indeed.com"
+      email_subject: "New jobs for Python Developer in San Francisco"
+      email_body: "15 new positions matching your saved search. Apply now before they're gone."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  # === NEWSLETTERS (should be not_important) ===
+  - description: "Newsletter - Tech"
+    vars:
+      email_from: "newsletter@techcrunch.com"
+      email_subject: "This Week in Tech: AI Breakthroughs"
+      email_body: "Top stories: OpenAI announces GPT-5, Google responds with Gemini 3, Apple enters AI race."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  - description: "Newsletter - Finance"
+    vars:
+      email_from: "digest@motleyfool.com"
+      email_subject: "5 Stocks to Buy Now"
+      email_body: "Our analysts pick the top stocks for the coming quarter. Plus: market analysis and investment tips."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  # === SOCIAL NOTIFICATIONS (should be not_important) ===
+  - description: "Social - Facebook"
+    vars:
+      email_from: "notification@facebook.com"
+      email_subject: "John commented on your post"
+      email_body: "John Smith commented: 'Great photo!' See more activity on Facebook."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  - description: "Social - Nextdoor"
+    vars:
+      email_from: "noreply@nextdoor.com"
+      email_subject: "5 new posts in your neighborhood"
+      email_body: "Free items, local recommendations, and safety alerts from neighbors near you."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  # === IMPORTANT - WORK EMAILS ===
+  - description: "Work - Direct from boss"
+    vars:
+      email_from: "manager@company.com"
+      email_subject: "Q4 Performance Review - Action Required"
+      email_body: "Hi, please complete your self-assessment by Friday. Let's schedule time to discuss."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'important'
+      - type: javascript
+        value: JSON.parse(output).confidence >= 0.8
+
+  - description: "Work - Meeting invite"
+    vars:
+      email_from: "calendar@company.com"
+      email_subject: "Invitation: Project Kickoff Meeting"
+      email_body: "You've been invited to Project Kickoff on Monday at 10am. Please confirm your attendance."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'important'
+
+  # === IMPORTANT - FINANCIAL ===
+  - description: "Financial - Bill due"
+    vars:
+      email_from: "billing@electric-company.com"
+      email_subject: "Your electricity bill is due in 3 days"
+      email_body: "Amount due: $145.32. Due date: January 15. Pay now to avoid late fees."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'important'
+
+  - description: "Financial - Bank alert"
+    vars:
+      email_from: "alerts@chase.com"
+      email_subject: "Large transaction alert"
+      email_body: "A transaction of $2,500 was made on your account ending in 4532. If you didn't make this transaction, contact us immediately."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'important'
+      - type: javascript
+        value: JSON.parse(output).confidence >= 0.9
+
+  # === IMPORTANT - SECURITY ===
+  - description: "Security - Password reset"
+    vars:
+      email_from: "security@google.com"
+      email_subject: "Security alert: New sign-in to your account"
+      email_body: "We noticed a new sign-in to your Google Account from a Windows device. If this wasn't you, review your account activity."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'important'
+      - type: javascript
+        value: JSON.parse(output).confidence >= 0.9
+
+  - description: "Security - 2FA code"
+    vars:
+      email_from: "noreply@github.com"
+      email_subject: "Your GitHub verification code"
+      email_body: "Your verification code is 123456. This code expires in 10 minutes."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'important'
+
+  # === IMPORTANT - PERSONAL ===
+  - description: "Personal - Friend message"
+    vars:
+      email_from: "friend@gmail.com"
+      email_subject: "Dinner this weekend?"
+      email_body: "Hey! It's been a while. Want to grab dinner on Saturday? Let me know what works for you."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'important'
+
+  # === EDGE CASES ===
+  - description: "Edge - Past calendar event"
+    vars:
+      email_from: "calendar@google.com"
+      email_subject: "Reminder: Meeting that happened yesterday"
+      email_body: "This is a reminder for an event that already occurred on January 14, 2025."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  - description: "Edge - Unsubscribe confirmation"
+    vars:
+      email_from: "noreply@marketing.com"
+      email_subject: "You've been unsubscribed"
+      email_body: "You have successfully unsubscribed from our mailing list. You will no longer receive promotional emails."
+    assert:
+      - type: javascript
+        value: JSON.parse(output).importance === 'not_important'
+
+  - description: "Edge - Auto-reply"
+    vars:
+      email_from: "colleague@company.com"
+      email_subject: "Out of Office: Re: Project Update"
+      email_body: "I am currently out of the office with limited access to email. I will respond when I return on Monday."
+    assert:
+      - type: javascript
+        value: "['not_important', 'uncertain'].includes(JSON.parse(output).importance)"
+

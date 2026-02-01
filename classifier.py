@@ -12,7 +12,9 @@ from google import genai
 from google.genai import types
 
 from config import Settings
+from context_store import ContextStore
 from gmail_client import Email
+from guardrails_validator import OutputGuardrails, ValidationError, create_guardrails
 
 logger = structlog.get_logger()
 
@@ -65,17 +67,27 @@ IMPORTANT CRITERIA:
 NOT IMPORTANT CRITERIA:
 {not_important_criteria}"""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, context_store: Optional[ContextStore] = None):
         self.settings = settings
+        self.context_store = context_store or ContextStore()
         
         # Configure Gemini client
         self.client = genai.Client(api_key=settings.gemini_api_key)
+        
+        # Initialize guardrails for output validation
+        self.guardrails = create_guardrails(auto_fix=True)
         
         # Build system prompt with criteria
         self.system_prompt = self.SYSTEM_PROMPT.format(
             important_criteria=settings.important_criteria,
             not_important_criteria=settings.not_important_criteria
         )
+        
+        # Add correction patterns to system prompt if any
+        correction_patterns = self.context_store.get_correction_patterns()
+        if correction_patterns:
+            self.system_prompt += "\n\nLEARNED FROM USER CORRECTIONS:\n"
+            self.system_prompt += "\n".join(correction_patterns)
     
     def _is_whitelisted(self, email: Email) -> bool:
         """Check if sender is whitelisted (always important)."""
@@ -97,16 +109,25 @@ NOT IMPORTANT CRITERIA:
         return False
     
     def _parse_response(self, response_text: str) -> dict:
-        """Parse LLM JSON response."""
+        """Parse and validate LLM JSON response using guardrails."""
         try:
-            # Handle markdown code blocks
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0]
+            # Use guardrails to validate and auto-fix the response
+            validated = self.guardrails.validate(response_text)
+            logger.debug("Guardrails validation passed", 
+                        importance=validated.get("importance"),
+                        confidence=validated.get("confidence"))
+            return validated
             
-            return json.loads(response_text.strip())
-        except json.JSONDecodeError as e:
+        except ValidationError as e:
+            logger.warning("Guardrails validation failed", error=str(e))
+            return {
+                "importance": "uncertain",
+                "confidence": 0.3,
+                "reasoning": f"Validation failed: {str(e)}",
+                "category": "other",
+                "suggested_action": "review"
+            }
+        except Exception as e:
             logger.warning("Failed to parse LLM response", error=str(e))
             return {
                 "importance": "uncertain",
@@ -228,9 +249,15 @@ Body Preview:
         
         logger.info("Classifying batch", count=len(emails))
         
-        # Build batch email summary
+        # Build batch email summary with sender context
         email_summaries = []
         for idx, email in enumerate(emails, 1):
+            # Get historical context for this sender
+            sender_context = self.context_store.get_context_for_sender(email.sender_email)
+            context_section = ""
+            if sender_context:
+                context_section = f"\n[SENDER HISTORY]\n{sender_context}\n"
+            
             summary = f"""
 --- EMAIL {idx} ---
 ID: {email.id}
@@ -238,7 +265,7 @@ From: {email.sender} <{email.sender_email}>
 Subject: {email.subject}
 Date: {email.date.strftime('%Y-%m-%d %H:%M')}
 Preview: {email.snippet}
-Body: {email.body_preview[:500] if email.body_preview else "(No body)"}
+Body: {email.body_preview[:500] if email.body_preview else "(No body)"}{context_section}
 """
             email_summaries.append(summary)
         

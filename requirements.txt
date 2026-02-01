@@ -17,3 +17,4 @@ typer
 
 # Logging
 structlog
+flask

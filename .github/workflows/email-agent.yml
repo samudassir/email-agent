@@ -1,9 +1,9 @@
 name: Email Agent
 
 on:
-  # Run on schedule (every 6 hours)
+  # Run daily at 11:00 AM PST (19:00 UTC)
   schedule:
-    - cron: '0 */6 * * *'  # At minute 0 of every 6th hour
+    - cron: '0 19 * * *'
   
   # Allow manual trigger
   workflow_dispatch:
