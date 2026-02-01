@@ -131,13 +131,26 @@ class GmailClient:
         
         return body
     
-    def get_unread_emails(self, max_results: int = 10) -> list[Email]:
-        """Fetch unread emails from inbox."""
+    def get_unread_emails(self, max_results: int = 10, older_than: str | None = None) -> list[Email]:
+        """
+        Fetch unread emails from inbox.
+        
+        Args:
+            max_results: Maximum number of emails to fetch
+            older_than: Optional age filter (e.g., "1y", "6m", "30d", "2w")
+                       Supported units: y (years), m (months), d (days), w (weeks)
+        """
         try:
+            # Build search query
+            query = "is:unread in:inbox"
+            if older_than:
+                query += f" older_than:{older_than}"
+                logger.info("Filtering emails older than", older_than=older_than)
+            
             # Search for unread emails in inbox
             results = self.service.users().messages().list(
                 userId="me",
-                q="is:unread in:inbox",
+                q=query,
                 maxResults=max_results
             ).execute()
             

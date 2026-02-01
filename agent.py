@@ -94,12 +94,13 @@ class EmailAgent:
             classification.suggested_action == "trash"
         )
     
-    def process_emails(self, interactive: bool = True) -> dict:
+    def process_emails(self, interactive: bool = True, older_than: str | None = None) -> dict:
         """
         Process unread emails - classify and take action.
         
         Args:
             interactive: If True, show results and ask for confirmation
+            older_than: Optional age filter (e.g., "1y", "6m", "30d")
         
         Returns:
             Summary statistics
@@ -116,7 +117,9 @@ class EmailAgent:
         
         # Fetch unread emails
         console.print("\n[bold blue]📬 Fetching unread emails...[/bold blue]")
-        emails = self.gmail.get_unread_emails(max_results=self.settings.batch_size)
+        if older_than:
+            console.print(f"[dim]Filtering: older than {older_than}[/dim]")
+        emails = self.gmail.get_unread_emails(max_results=self.settings.batch_size, older_than=older_than)
         
         if not emails:
             console.print("[yellow]No unread emails found.[/yellow]")
@@ -128,12 +131,15 @@ class EmailAgent:
         console.print("[bold blue]🤖 Classifying emails...[/bold blue]\n")
         classifications = []
         
-        for email in emails:
-            classification = self.classifier.classify(email)
-            classifications.append((email, classification))
+        # Use batch classification (10 emails per API call)
+        batch_results = self.classifier.classify_batch(emails, batch_size=10)
+        
+        # Pair emails with their classifications
+        classifications = list(zip(emails, batch_results))
+        
+        # Update stats
+        for email, classification in classifications:
             stats["processed"] += 1
-            
-            # Update stats
             if classification.importance == ImportanceLevel.IMPORTANT:
                 stats["important"] += 1
             elif classification.importance == ImportanceLevel.NOT_IMPORTANT:
@@ -287,6 +293,7 @@ def main():
     def run(
         batch_size: int = typer.Option(10, "--batch", "-b", help="Number of emails to process"),
         dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Don't actually trash emails"),
+        older_than: str = typer.Option(None, "--older-than", "-o", help="Only process emails older than (e.g., 1y, 6m, 30d, 2w)"),
     ):
         """Process unread emails and classify them."""
         settings = get_settings()
@@ -305,7 +312,7 @@ def main():
         user_email = agent.gmail.get_user_email()
         console.print(f"[dim]Logged in as: {user_email}[/dim]\n")
         
-        agent.process_emails()
+        agent.process_emails(older_than=older_than)
     
     @app.command()
     def undo():

@@ -187,11 +187,168 @@ Body Preview:
                 category="error"
             )
     
-    def classify_batch(self, emails: list[Email]) -> list[ClassificationResult]:
-        """Classify multiple emails."""
+    def classify_batch(self, emails: list[Email], batch_size: int = 10) -> list[ClassificationResult]:
+        """
+        Classify multiple emails efficiently using batched LLM calls.
+        Sends up to batch_size emails in a single API call.
+        """
         results = []
+        
+        # Separate whitelisted emails (no API call needed)
+        to_classify = []
         for email in emails:
-            result = self.classify(email)
-            results.append(result)
+            if self._is_whitelisted(email):
+                results.append(ClassificationResult(
+                    email_id=email.id,
+                    importance=ImportanceLevel.IMPORTANT,
+                    confidence=1.0,
+                    reasoning="Sender is on whitelist",
+                    suggested_action="keep",
+                    category="whitelisted"
+                ))
+            else:
+                to_classify.append(email)
+        
+        # Process non-whitelisted emails in batches
+        for i in range(0, len(to_classify), batch_size):
+            batch = to_classify[i:i + batch_size]
+            batch_results = self._classify_batch_internal(batch)
+            results.extend(batch_results)
+        
+        # Sort results to match original email order
+        email_order = {email.id: idx for idx, email in enumerate(emails)}
+        results.sort(key=lambda r: email_order.get(r.email_id, 999))
+        
         return results
+    
+    def _classify_batch_internal(self, emails: list[Email]) -> list[ClassificationResult]:
+        """Classify a batch of emails in a single API call."""
+        if not emails:
+            return []
+        
+        logger.info("Classifying batch", count=len(emails))
+        
+        # Build batch email summary
+        email_summaries = []
+        for idx, email in enumerate(emails, 1):
+            summary = f"""
+--- EMAIL {idx} ---
+ID: {email.id}
+From: {email.sender} <{email.sender_email}>
+Subject: {email.subject}
+Date: {email.date.strftime('%Y-%m-%d %H:%M')}
+Preview: {email.snippet}
+Body: {email.body_preview[:500] if email.body_preview else "(No body)"}
+"""
+            email_summaries.append(summary)
+        
+        batch_prompt = f"""{self.system_prompt}
+
+Classify ALL {len(emails)} emails below. Return a JSON array with one object per email.
+
+Each object must have:
+- "email_id": the ID from the email
+- "importance": "important" | "not_important" | "uncertain"
+- "confidence": 0.0-1.0
+- "reasoning": brief explanation
+- "category": "work" | "personal" | "newsletter" | "promotional" | "notification" | "spam" | "financial" | "social" | "other"
+- "suggested_action": "keep" | "trash" | "review"
+
+{"".join(email_summaries)}
+
+Respond with ONLY a JSON array:
+[{{"email_id": "...", "importance": "...", ...}}, ...]"""
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.settings.classifier_model,
+                contents=batch_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=2000
+                )
+            )
+            
+            return self._parse_batch_response(response.text, emails)
+            
+        except Exception as e:
+            error_str = str(e)
+            logger.error("Batch classification failed", error=error_str)
+            
+            # Don't fallback on quota errors
+            if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
+                logger.warning("Quota exhausted - cannot classify")
+                return [
+                    ClassificationResult(
+                        email_id=email.id,
+                        importance=ImportanceLevel.UNCERTAIN,
+                        confidence=0.0,
+                        reasoning="API quota exhausted",
+                        suggested_action="review",
+                        category="quota_error"
+                    )
+                    for email in emails
+                ]
+            
+            # Fallback to individual for other errors
+            logger.info("Falling back to individual classification")
+            return [self.classify(email) for email in emails]
+    
+    def _parse_batch_response(self, response_text: str, emails: list[Email]) -> list[ClassificationResult]:
+        """Parse batch LLM response."""
+        try:
+            text = response_text
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+            
+            results_data = json.loads(text.strip())
+            
+            if not isinstance(results_data, list):
+                raise ValueError("Expected JSON array")
+            
+            results_by_id = {r.get("email_id"): r for r in results_data}
+            
+            results = []
+            importance_map = {
+                "important": ImportanceLevel.IMPORTANT,
+                "not_important": ImportanceLevel.NOT_IMPORTANT,
+                "uncertain": ImportanceLevel.UNCERTAIN
+            }
+            
+            for idx, email in enumerate(emails):
+                result_data = results_by_id.get(email.id)
+                if not result_data and idx < len(results_data):
+                    result_data = results_data[idx]
+                
+                if result_data:
+                    importance = importance_map.get(
+                        result_data.get("importance", "uncertain"), 
+                        ImportanceLevel.UNCERTAIN
+                    )
+                    results.append(ClassificationResult(
+                        email_id=email.id,
+                        importance=importance,
+                        confidence=result_data.get("confidence", 0.5),
+                        reasoning=result_data.get("reasoning", "No reasoning"),
+                        suggested_action=result_data.get("suggested_action", "review"),
+                        category=result_data.get("category", "other")
+                    ))
+                else:
+                    results.append(ClassificationResult(
+                        email_id=email.id,
+                        importance=ImportanceLevel.UNCERTAIN,
+                        confidence=0.0,
+                        reasoning="Not in batch response",
+                        suggested_action="review",
+                        category="error"
+                    ))
+            
+            logger.info("Batch classification complete", total=len(emails), classified=len(results))
+            return results
+            
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Failed to parse batch response", error=str(e))
+            return [self.classify(email) for email in emails]
 

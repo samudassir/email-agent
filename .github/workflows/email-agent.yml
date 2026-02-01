@@ -1,0 +1,76 @@
+name: Email Agent
+
+on:
+  # Run on schedule (every 6 hours)
+  schedule:
+    - cron: '0 */6 * * *'  # At minute 0 of every 6th hour
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Number of emails to process'
+        required: false
+        default: '20'
+      dry_run:
+        description: 'Dry run mode (true/false)'
+        required: false
+        default: 'false'
+      older_than:
+        description: 'Only process emails older than (e.g., 1y, 6m, 30d, 2w)'
+        required: false
+        default: ''
+
+jobs:
+  process-emails:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Set up credentials
+        run: |
+          echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+          echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
+      
+      - name: Run email agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CLASSIFIER_MODEL: 'gemini-2.5-flash-lite'
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          BATCH_SIZE: ${{ github.event.inputs.batch_size || '20' }}
+          CONFIDENCE_THRESHOLD: '0.8'
+          WHITELIST_DOMAINS: ${{ secrets.WHITELIST_DOMAINS || '' }}
+          WHITELIST_SENDERS: ${{ secrets.WHITELIST_SENDERS || '' }}
+        run: |
+          OLDER_THAN_FLAG=""
+          if [ -n "${{ github.event.inputs.older_than }}" ]; then
+            OLDER_THAN_FLAG="--older-than ${{ github.event.inputs.older_than }}"
+          fi
+          
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+            DRY_RUN_FLAG="--no-dry-run"
+          fi
+          
+          python agent.py run --batch $BATCH_SIZE $DRY_RUN_FLAG $OLDER_THAN_FLAG
+      
+      - name: Upload action log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-actions-${{ github.run_number }}
+          path: agent_actions.json
+          retention-days: 30
+
