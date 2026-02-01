@@ -15,8 +15,56 @@
       "uncertain_count": 1,
       "corrections": 0,
       "last_seen": "2026-01-31T22:26:49.657279"
+    },
+    "postman.com": {
+      "domain": "postman.com",
+      "important_count": 0,
+      "not_important_count": 0,
+      "uncertain_count": 6,
+      "corrections": 0,
+      "last_seen": "2026-02-01T13:47:44.767780"
+    },
+    "info.fool.com": {
+      "domain": "info.fool.com",
+      "important_count": 0,
+      "not_important_count": 0,
+      "uncertain_count": 6,
+      "corrections": 0,
+      "last_seen": "2026-02-01T13:47:44.771167"
+    },
+    "email.stackcommerce.com": {
+      "domain": "email.stackcommerce.com",
+      "important_count": 0,
+      "not_important_count": 0,
+      "uncertain_count": 4,
+      "corrections": 0,
+      "last_seen": "2026-02-01T13:40:50.978800"
+    },
+    "b.express.com": {
+      "domain": "b.express.com",
+      "important_count": 0,
+      "not_important_count": 0,
+      "uncertain_count": 1,
+      "corrections": 0,
+      "last_seen": "2026-02-01T13:37:49.227328"
+    },
+    "emails.macys.com": {
+      "domain": "emails.macys.com",
+      "important_count": 0,
+      "not_important_count": 0,
+      "uncertain_count": 1,
+      "corrections": 0,
+      "last_seen": "2026-02-01T13:37:49.230751"
+    },
+    "linkedin.com": {
+      "domain": "linkedin.com",
+      "important_count": 0,
+      "not_important_count": 0,
+      "uncertain_count": 2,
+      "corrections": 0,
+      "last_seen": "2026-02-01T13:47:44.763554"
     }
   },
   "corrections": [],
-  "last_updated": "2026-01-31T22:26:49.666242"
+  "last_updated": "2026-02-01T13:47:44.771194"
 }

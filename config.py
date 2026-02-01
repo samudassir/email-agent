@@ -36,6 +36,12 @@ class Settings(BaseSettings):
         description="Comma-separated email addresses that are always marked important"
     )
     
+    # Opik Observability (optional - no PII is sent)
+    opik_enabled: bool = Field(default=False, description="Enable Opik observability")
+    opik_api_key: str = Field(default="", description="Opik API key")
+    opik_project: str = Field(default="email-agent", description="Opik project name")
+    opik_workspace: str = Field(default="", description="Opik workspace name")
+    
     def get_whitelist_domains(self) -> list[str]:
         """Get whitelist domains as a list."""
         if not self.whitelist_domains:

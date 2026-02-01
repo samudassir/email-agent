@@ -53,6 +53,10 @@ jobs:
           CONFIDENCE_THRESHOLD: '0.8'
           WHITELIST_DOMAINS: ${{ secrets.WHITELIST_DOMAINS || '' }}
           WHITELIST_SENDERS: ${{ secrets.WHITELIST_SENDERS || '' }}
+          # Opik Observability (no PII sent)
+          OPIK_ENABLED: 'true'
+          OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
+          OPIK_PROJECT: 'email-agent'
         run: |
           OLDER_THAN_FLAG=""
           if [ -n "${{ github.event.inputs.older_than }}" ]; then

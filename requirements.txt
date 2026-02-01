@@ -18,3 +18,6 @@ typer
 # Logging
 structlog
 flask
+
+# Observability
+opik

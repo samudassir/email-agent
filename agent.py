@@ -4,6 +4,7 @@ Email Agent - Autonomous email classifier and organizer.
 
 import json
 import os
+import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional
@@ -18,6 +19,7 @@ from config import Settings, get_settings
 from gmail_client import GmailClient, Email
 from classifier import EmailClassifier, ClassificationResult, ImportanceLevel
 from context_store import ContextStore
+from opik_integration import init_opik, get_tracker, is_opik_enabled
 
 logger = structlog.get_logger()
 console = Console()
@@ -47,6 +49,15 @@ class EmailAgent:
         self.classifier = EmailClassifier(settings, context_store=self.context_store)
         self.action_log: list[ActionLog] = []
         self.log_file = "agent_actions.json"
+        
+        # Initialize Opik observability (PII-free)
+        if settings.opik_enabled and settings.opik_api_key:
+            init_opik(
+                api_key=settings.opik_api_key,
+                project=settings.opik_project,
+                workspace=settings.opik_workspace
+            )
+        self.tracker = get_tracker()
         
         # Load previous action log
         self._load_action_log()
@@ -123,14 +134,18 @@ class EmailAgent:
         Returns:
             Summary statistics
         """
+        session_start = time.time()
+        
         stats = {
             "processed": 0,
             "important": 0,
             "not_important": 0,
             "uncertain": 0,
+            "whitelisted": 0,
             "trashed": 0,
             "kept": 0,
-            "errors": 0
+            "errors": 0,
+            "total_confidence": 0.0
         }
         
         # Fetch unread emails
@@ -158,12 +173,15 @@ class EmailAgent:
         # Update stats
         for email, classification in classifications:
             stats["processed"] += 1
+            stats["total_confidence"] += classification.confidence
             if classification.importance == ImportanceLevel.IMPORTANT:
                 stats["important"] += 1
             elif classification.importance == ImportanceLevel.NOT_IMPORTANT:
                 stats["not_important"] += 1
             else:
                 stats["uncertain"] += 1
+            if classification.category == "whitelisted":
+                stats["whitelisted"] += 1
         
         # Display results
         self._display_classification_results(classifications)
@@ -197,6 +215,25 @@ class EmailAgent:
         
         # Display summary
         self._display_summary(stats)
+        
+        # Track session completion (PII-free metrics only)
+        session_latency = (time.time() - session_start) * 1000
+        avg_confidence = stats["total_confidence"] / stats["processed"] if stats["processed"] > 0 else 0.0
+        
+        self.tracker.track_session_complete(
+            batch_size=self.settings.batch_size,
+            emails_processed=stats["processed"],
+            emails_whitelisted=stats["whitelisted"],
+            emails_important=stats["important"],
+            emails_not_important=stats["not_important"],
+            emails_uncertain=stats["uncertain"],
+            emails_trashed=stats["trashed"],
+            emails_kept=stats["kept"],
+            errors_count=stats["errors"],
+            total_latency_ms=session_latency,
+            avg_confidence=avg_confidence,
+            dry_run=self.settings.dry_run
+        )
         
         return stats
     
