@@ -148,92 +148,154 @@ class EmailAgent:
             "total_confidence": 0.0
         }
         
-        # Fetch unread emails
-        console.print("\n[bold blue]📬 Fetching unread emails...[/bold blue]")
-        if older_than:
-            console.print(f"[dim]Filtering: older than {older_than}[/dim]")
-        emails = self.gmail.get_unread_emails(max_results=self.settings.batch_size, older_than=older_than)
+        # Start Opik trace for the entire session
+        with self.tracker.trace_session("email_processing_session"):
+            # Fetch unread emails
+            console.print("\n[bold blue]📬 Fetching unread emails...[/bold blue]")
+            if older_than:
+                console.print(f"[dim]Filtering: older than {older_than}[/dim]")
+            
+            fetch_start = time.time()
+            emails = self.gmail.get_unread_emails(max_results=self.settings.batch_size, older_than=older_than)
+            fetch_latency = (time.time() - fetch_start) * 1000
+            
+            # Track email fetching as a span
+            self.tracker.track_email_fetch(
+                email_count=len(emails),
+                max_results=self.settings.batch_size,
+                older_than=older_than,
+                latency_ms=fetch_latency
+            )
+            
+            if not emails:
+                console.print("[yellow]No unread emails found.[/yellow]")
+                return stats
+            
+            console.print(f"[green]Found {len(emails)} unread email(s)[/green]\n")
+            
+            # Classify all emails
+            console.print("[bold blue]🤖 Classifying emails...[/bold blue]\n")
+            classifications = []
+            
+            # Use batch classification (10 emails per API call)
+            batch_results = self.classifier.classify_batch(emails, batch_size=10)
+            
+            # Pair emails with their classifications
+            classifications = list(zip(emails, batch_results))
         
-        if not emails:
-            console.print("[yellow]No unread emails found.[/yellow]")
-            return stats
-        
-        console.print(f"[green]Found {len(emails)} unread email(s)[/green]\n")
-        
-        # Classify all emails
-        console.print("[bold blue]🤖 Classifying emails...[/bold blue]\n")
-        classifications = []
-        
-        # Use batch classification (10 emails per API call)
-        batch_results = self.classifier.classify_batch(emails, batch_size=10)
-        
-        # Pair emails with their classifications
-        classifications = list(zip(emails, batch_results))
-        
-        # Update stats
-        for email, classification in classifications:
-            stats["processed"] += 1
-            stats["total_confidence"] += classification.confidence
-            if classification.importance == ImportanceLevel.IMPORTANT:
-                stats["important"] += 1
-            elif classification.importance == ImportanceLevel.NOT_IMPORTANT:
-                stats["not_important"] += 1
-            else:
-                stats["uncertain"] += 1
-            if classification.category == "whitelisted":
-                stats["whitelisted"] += 1
-        
-        # Display results
-        self._display_classification_results(classifications)
-        
-        # Handle actions
-        if self.settings.dry_run:
-            console.print(Panel(
-                "[yellow]DRY RUN MODE[/yellow] - No emails will be trashed.\n"
-                "Set DRY_RUN=false in .env to enable automatic actions.",
-                title="⚠️ Dry Run",
-                box=box.ROUNDED
-            ))
-        
-        # Process each classification
-        for email, classification in classifications:
-            if self._should_auto_trash(classification):
-                if self.settings.dry_run:
-                    console.print(f"  [dim]Would trash: {email.subject[:50]}...[/dim]")
-                    self._log_action(email, classification, "would_trash", True)
+            # Update stats
+            for email, classification in classifications:
+                stats["processed"] += 1
+                stats["total_confidence"] += classification.confidence
+                if classification.importance == ImportanceLevel.IMPORTANT:
+                    stats["important"] += 1
+                elif classification.importance == ImportanceLevel.NOT_IMPORTANT:
+                    stats["not_important"] += 1
                 else:
-                    success = self.gmail.trash_email(email.id)
-                    if success:
-                        stats["trashed"] += 1
-                        console.print(f"  [red]🗑️ Trashed: {email.subject[:50]}...[/red]")
+                    stats["uncertain"] += 1
+                if classification.category == "whitelisted":
+                    stats["whitelisted"] += 1
+            
+            # Display results
+            self._display_classification_results(classifications)
+            
+            # Handle actions
+            if self.settings.dry_run:
+                console.print(Panel(
+                    "[yellow]DRY RUN MODE[/yellow] - No emails will be trashed.\n"
+                    "Set DRY_RUN=false in .env to enable automatic actions.",
+                    title="⚠️ Dry Run",
+                    box=box.ROUNDED
+                ))
+            
+            # Process each classification with action tracking
+            action_start = time.time()
+            for email, classification in classifications:
+                if self._should_auto_trash(classification):
+                    if self.settings.dry_run:
+                        console.print(f"  [dim]Would trash: {email.subject[:50]}...[/dim]")
+                        self._log_action(email, classification, "would_trash", True)
+                        # Track dry-run trash as a span
+                        self.tracker.track_email_action(
+                            action="trash",
+                            success=True,
+                            latency_ms=0,
+                            dry_run=True,
+                            email=email,
+                            importance=classification.importance.value,
+                            confidence=classification.confidence,
+                            category=classification.category
+                        )
                     else:
-                        stats["errors"] += 1
-                    self._log_action(email, classification, "trash", success)
-            else:
-                stats["kept"] += 1
-                self._log_action(email, classification, "keep", True)
-        
-        # Display summary
-        self._display_summary(stats)
-        
-        # Track session completion (PII-free metrics only)
-        session_latency = (time.time() - session_start) * 1000
-        avg_confidence = stats["total_confidence"] / stats["processed"] if stats["processed"] > 0 else 0.0
-        
-        self.tracker.track_session_complete(
-            batch_size=self.settings.batch_size,
-            emails_processed=stats["processed"],
-            emails_whitelisted=stats["whitelisted"],
-            emails_important=stats["important"],
-            emails_not_important=stats["not_important"],
-            emails_uncertain=stats["uncertain"],
-            emails_trashed=stats["trashed"],
-            emails_kept=stats["kept"],
-            errors_count=stats["errors"],
-            total_latency_ms=session_latency,
-            avg_confidence=avg_confidence,
-            dry_run=self.settings.dry_run
-        )
+                        trash_start = time.time()
+                        success = self.gmail.trash_email(email.id)
+                        trash_latency = (time.time() - trash_start) * 1000
+                        
+                        # Track trash action as a span
+                        self.tracker.track_email_action(
+                            action="trash",
+                            success=success,
+                            latency_ms=trash_latency,
+                            dry_run=False,
+                            email=email,
+                            importance=classification.importance.value,
+                            confidence=classification.confidence,
+                            category=classification.category
+                        )
+                        
+                        if success:
+                            stats["trashed"] += 1
+                            console.print(f"  [red]🗑️ Trashed: {email.subject[:50]}...[/red]")
+                        else:
+                            stats["errors"] += 1
+                        self._log_action(email, classification, "trash", success)
+                else:
+                    stats["kept"] += 1
+                    self._log_action(email, classification, "keep", True)
+                    # Track keep action as a span
+                    self.tracker.track_email_action(
+                        action="keep",
+                        success=True,
+                        latency_ms=0,
+                        dry_run=self.settings.dry_run,
+                        email=email,
+                        importance=classification.importance.value,
+                        confidence=classification.confidence,
+                        category=classification.category
+                    )
+            
+            action_latency = (time.time() - action_start) * 1000
+            
+            # Display summary
+            self._display_summary(stats)
+            
+            # Track session completion (PII-free metrics only)
+            session_latency = (time.time() - session_start) * 1000
+            avg_confidence = stats["total_confidence"] / stats["processed"] if stats["processed"] > 0 else 0.0
+            
+            # Online evaluation: score the session on the trace
+            all_results = [c for _, c in classifications]
+            self.tracker.evaluate_session(
+                emails_processed=stats["processed"],
+                errors_count=stats["errors"],
+                avg_confidence=avg_confidence,
+                classifications=all_results,
+            )
+            
+            self.tracker.track_session_complete(
+                batch_size=self.settings.batch_size,
+                emails_processed=stats["processed"],
+                emails_whitelisted=stats["whitelisted"],
+                emails_important=stats["important"],
+                emails_not_important=stats["not_important"],
+                emails_uncertain=stats["uncertain"],
+                emails_trashed=stats["trashed"],
+                emails_kept=stats["kept"],
+                errors_count=stats["errors"],
+                total_latency_ms=session_latency,
+                avg_confidence=avg_confidence,
+                dry_run=self.settings.dry_run
+            )
         
         return stats
     
