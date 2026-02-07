@@ -10,8 +10,9 @@ from pydantic import Field
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
-    # Google Gemini credentials (required)
+    # Google Gemini credentials (required, with optional fallback key)
     gemini_api_key: str = Field(..., description="Google Gemini API Key")
+    gemini_api_key_2: str = Field(default="", description="Fallback Gemini API Key used when primary hits quota limits")
     
     # Model settings
     classifier_model: str = Field(default="gemini-2.0-flash", description="Gemini model for email classification")

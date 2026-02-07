@@ -58,11 +58,11 @@
     },
     "linkedin.com": {
       "domain": "linkedin.com",
-      "important_count": 0,
+      "important_count": 5,
       "not_important_count": 0,
       "uncertain_count": 2,
       "corrections": 0,
-      "last_seen": "2026-02-01T13:47:44.763554"
+      "last_seen": "2026-02-06T21:04:45.531926"
     },
     "docusign.net": {
       "domain": "docusign.net",
@@ -103,8 +103,40 @@
       "uncertain_count": 0,
       "corrections": 0,
       "last_seen": "2026-02-05T12:14:50.939836"
+    },
+    "google.com": {
+      "domain": "google.com",
+      "important_count": 9,
+      "not_important_count": 0,
+      "uncertain_count": 1,
+      "corrections": 0,
+      "last_seen": "2026-02-06T21:04:09.737051"
+    },
+    "educative.io": {
+      "domain": "educative.io",
+      "important_count": 0,
+      "not_important_count": 5,
+      "uncertain_count": 2,
+      "corrections": 0,
+      "last_seen": "2026-02-06T20:52:21.669177"
+    },
+    "robinhood.com": {
+      "domain": "robinhood.com",
+      "important_count": 1,
+      "not_important_count": 1,
+      "uncertain_count": 2,
+      "corrections": 0,
+      "last_seen": "2026-02-06T20:53:21.248706"
+    },
+    "atgpay.com": {
+      "domain": "atgpay.com",
+      "important_count": 2,
+      "not_important_count": 0,
+      "uncertain_count": 2,
+      "corrections": 0,
+      "last_seen": "2026-02-06T20:53:21.249369"
     }
   },
   "corrections": [],
-  "last_updated": "2026-02-05T13:23:55.192794"
+  "last_updated": "2026-02-06T21:04:45.531934"
 }
