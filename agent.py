@@ -92,7 +92,11 @@ class EmailAgent:
         action: str,
         success: bool
     ):
-        """Log an action taken by the agent."""
+        """Log an action taken by the agent.
+        
+        Only writes to disk when an actual delete (trash) is performed.
+        Dry-run and keep actions are kept in memory for session display only.
+        """
         log_entry = ActionLog(
             timestamp=datetime.now().isoformat(),
             email_id=email.id,
@@ -105,7 +109,10 @@ class EmailAgent:
             reasoning=classification.reasoning
         )
         self.action_log.append(log_entry)
-        self._save_action_log()
+        
+        # Only persist to disk for actual deletions
+        if action == "trash" and success:
+            self._save_action_log()
         
         # Record classification in context store for learning
         # (only record actual actions, not dry runs)
