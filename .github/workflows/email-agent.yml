@@ -64,8 +64,6 @@ jobs:
           OLDER_THAN_FLAG=""
           if [ -n "$OLDER_THAN" ]; then
             OLDER_THAN_FLAG="--older-than $OLDER_THAN"
-          else
-            OLDER_THAN_FLAG='--older-than ""'
           fi
           
           DRY_RUN_FLAG=""

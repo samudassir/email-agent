@@ -427,12 +427,16 @@ def main():
     def run(
         batch_size: int = typer.Option(10, "--batch", "-b", help="Number of emails to process"),
         dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Don't actually trash emails"),
-        older_than: str = typer.Option("6m", "--older-than", "-o", help="Only process emails older than (e.g., 1y, 6m, 30d, 2w). Default: 6m"),
+        older_than: str = typer.Option("", "--older-than", "-o", help="Only process emails older than (e.g., 1y, 6m, 30d, 2w). Empty = latest emails"),
     ):
         """Process unread emails and classify them."""
         settings = get_settings()
         settings.batch_size = batch_size
         settings.dry_run = dry_run
+        
+        # Normalize older_than: treat empty/whitespace-only as None
+        older_than_value = older_than.strip().strip('"').strip("'") if older_than else None
+        older_than_value = older_than_value or None
         
         console.print(Panel(
             "[bold blue]🤖 Email Agent[/bold blue]\n"
@@ -446,7 +450,7 @@ def main():
         user_email = agent.gmail.get_user_email()
         console.print(f"[dim]Logged in as: {user_email}[/dim]\n")
         
-        agent.process_emails(older_than=older_than)
+        agent.process_emails(older_than=older_than_value)
     
     @app.command()
     def undo():

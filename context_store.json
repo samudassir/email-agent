@@ -2,11 +2,11 @@
   "sender_stats": {
     "github.com": {
       "domain": "github.com",
-      "important_count": 4,
+      "important_count": 5,
       "not_important_count": 0,
       "uncertain_count": 4,
       "corrections": 0,
-      "last_seen": "2026-01-31T22:26:49.666233"
+      "last_seen": "2026-02-08T21:07:37.608439"
     },
     "rs.email.nextdoor.com": {
       "domain": "rs.email.nextdoor.com",
@@ -138,5 +138,5 @@
     }
   },
   "corrections": [],
-  "last_updated": "2026-02-06T21:04:45.531934"
+  "last_updated": "2026-02-08T21:07:37.608454"
 }
