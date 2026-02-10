@@ -29,17 +29,6 @@ Email Agent is an **autonomous AI agent** that does the triage for you:
                      └──────────────────┘     └──────────────────┘
 ```
 
-## Why This Is a True AI Agent
-
-| Agent Trait | Implementation |
-|---|---|
-| **Perceives environment** | Reads emails via Gmail API (sender, subject, body, date, labels) |
-| **Reasons about context** | LLM classifies with structured reasoning; sender history injected into prompt |
-| **Makes autonomous decisions** | Confidence threshold + age-based rules + whitelist logic |
-| **Takes real actions** | Trashes emails via Gmail API (recoverable for 30 days) |
-| **Learns from feedback** | Undo triggers correction recording → future prompts adjusted |
-| **Maintains state** | Context store tracks 17+ sender domains across sessions |
-
 ## Use of LLMs
 
 - **Google Gemini 2.0 Flash** for classification via structured JSON output
