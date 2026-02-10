@@ -1,181 +1,189 @@
 # Email Agent 🤖📧
 
-An autonomous AI agent that reads your unread Gmail emails, classifies them by importance using Google Gemini, and automatically trashes non-important ones.
+An autonomous AI agent that keeps your inbox clean — saving **4 hours/month** on email cleanup and **$120/year** on cloud storage. It reads your unread Gmail, classifies each email by importance using Google Gemini, and automatically trashes the noise. It learns from your corrections to get smarter over time.
 
-## Features
+## The Problem
 
-- 🔍 **Smart Classification** — Uses Google Gemini to understand email context and intent
-- 🛡️ **Safety First** — Dry-run mode (default), undo functionality, and whitelist support
-- ⚡ **Autonomous** — Runs independently, makes decisions, takes actions
-- 📊 **Transparent** — Shows reasoning and confidence for every classification
-- 🎯 **Customizable** — Define your own criteria for important vs. not important
-- 📜 **Audit Trail** — Logs all actions for review and accountability
+The average knowledge worker spends **2.5 hours/day** on email. Most of that is wading through newsletters, promotions, social notifications, and automated alerts that don't need attention. Meanwhile, Gmail's 15 GB fills up with years of junk, forcing you to pay for extra storage or manually clean up.
 
-## Architecture
+## The Solution
+
+Email Agent is an **autonomous AI agent** that does the triage for you:
+
+1. **Perceives** — Connects to your Gmail and reads unread emails
+2. **Reasons** — Uses Google Gemini to analyze sender, content, and context
+3. **Decides** — Classifies each email as important, not important, or uncertain
+4. **Acts** — Auto-trashes low-value emails (newsletters, promos, old notifications)
+5. **Learns** — Records corrections when you undo a mistake, and feeds those patterns back into future classifications
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Gmail API     │────▶│   Classifier    │────▶│   Decision      │
-│   (Unread)      │     │   (Gemini)      │     │   Engine        │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                                                        │
-                        ┌───────────────────────────────┼───────────────────────────────┐
-                        │                               │                               │
-                        ▼                               ▼                               ▼
-                ┌───────────────┐              ┌───────────────┐              ┌───────────────┐
-                │   IMPORTANT   │              │  NOT IMPORTANT │              │   UNCERTAIN   │
-                │   → Keep      │              │   → Trash      │              │   → Review    │
-                └───────────────┘              └───────────────┘              └───────────────┘
+┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐     ┌──────────────┐
+│  Gmail API   │────▶│  Gemini LLM      │────▶│  Decision Engine │────▶│  Take Action │
+│  (Fetch)     │     │  (Classify)      │     │  (Confidence +   │     │  (Trash/Keep)│
+│              │     │                  │     │   Age + Context)  │     │              │
+└──────────────┘     └──────────────────┘     └──────────────────┘     └──────┬───────┘
+                                                                              │
+                     ┌──────────────────┐     ┌──────────────────┐            │
+                     │  Context Store   │◀────│  User Correction │◀───────────┘
+                     │  (Learn)         │     │  (Undo → Learn)  │    Feedback Loop
+                     └──────────────────┘     └──────────────────┘
 ```
 
-## Prerequisites
+## Why This Is a True AI Agent
 
-- Python 3.10+
-- Google Cloud account (for Gmail API OAuth)
-- Google Gemini API key (free at [aistudio.google.com](https://aistudio.google.com/app/apikey))
+| Agent Trait | Implementation |
+|---|---|
+| **Perceives environment** | Reads emails via Gmail API (sender, subject, body, date, labels) |
+| **Reasons about context** | LLM classifies with structured reasoning; sender history injected into prompt |
+| **Makes autonomous decisions** | Confidence threshold + age-based rules + whitelist logic |
+| **Takes real actions** | Trashes emails via Gmail API (recoverable for 30 days) |
+| **Learns from feedback** | Undo triggers correction recording → future prompts adjusted |
+| **Maintains state** | Context store tracks 17+ sender domains across sessions |
+
+## Use of LLMs
+
+- **Google Gemini 2.0 Flash** for classification via structured JSON output
+- **Batch classification** — up to 10 emails per API call for efficiency
+- **Security-hardened system prompt** with `<EMAIL>` boundary tags and explicit injection defenses
+- **Sender history context** injected into prompt — the LLM sees historical classification patterns per domain
+- **Correction patterns** automatically added to the system prompt when the agent has been wrong before
+- **Output guardrails** validate and auto-fix every LLM response (7-step pipeline: JSON → fields → importance → confidence → category → action → reasoning)
+- **Age-based post-processing** overrides LLM decisions for old emails (90d+ and 1y+ thresholds with protected categories)
+
+## Evaluation & Observability
+
+This is where the project goes deep. Four layers of evaluation:
+
+### 1. Opik Integration (Online Observability)
+
+Every run produces a **full session trace** with nested spans, all PII-scrubbed before leaving the machine:
+
+```
+email_processing_session (trace)
+├── fetch_emails (span) — latency, email count
+├── llm_call (span) — model, tokens, latency, response, error type
+├── classify_email (span) — per-email: domain, importance, confidence, category
+├── email_action_trash (span) — action taken, success, dry_run flag
+├── suspicious_activity (span) — prompt injection detection with risk level
+└── session_complete (span) — aggregate metrics
+```
+
+**Online feedback scores** logged on every trace:
+- `json_parse_success` — did the LLM return valid JSON?
+- `response_completeness` — batch returned all expected classifications?
+- `classification_confidence` — average confidence
+- `error_free_rate` — fraction processed without errors
+- `high_confidence_rate` — fraction with confidence ≥ 0.5
+- `decisive_rate` — fraction classified as important/not_important (vs uncertain)
+- `session_quality` — composite weighted score (40% confidence, 25% error-free, 20% high-confidence, 15% decisive)
+
+### 2. Prompt Optimization (Opik Experiments)
+
+`optimize_prompt.py` uses Opik's `evaluate()` framework to compare prompt variants:
+
+- **19 test cases** stored as an Opik dataset (promotional, newsletters, job alerts, work, financial, security, personal, edge cases)
+- **4 scoring functions**: importance accuracy, JSON validity, confidence calibration, category match
+- **2 prompt variants** (baseline vs v2-structured) with side-by-side comparison
+- **Optimization tracking** via `opik.create_optimization()` — results visible in the Opik dashboard
+
+### 3. Security Tests (Garak-Style)
+
+`evals/security_tests.py` runs **12 adversarial tests** across 4 categories:
+
+| Category | Tests | What It Checks |
+|---|---|---|
+| Prompt Injection | 5 | Basic injection, system override, JSON injection, delimiter confusion, instruction smuggling |
+| Jailbreak | 3 | DAN, roleplay, hypothetical scenario |
+| Data Exfiltration | 2 | System prompt leak, instruction reveal |
+| Classification Manipulation | 2 | CEO impersonation, keyword stuffing |
+
+### 4. Promptfoo (Classification Accuracy)
+
+`evals/promptfoo.yaml` — 19 test cases with assertions on importance and confidence, runnable via `npx promptfoo eval`.
+
+### PII Scrubbing
+
+All observability data passes through `pii_scrubber.py` before reaching Opik:
+- Email addresses → domain only + SHA-256 hash
+- Subject/body → length only (content never sent)
+- Timestamps → hour-of-day + day-of-week only
+- Regex scrubbing for emails, phone numbers, SSNs in LLM response text
+
+## Safety & Security
+
+| Feature | How It Works |
+|---|---|
+| **Dry-run mode** | Default — shows preview without trashing anything |
+| **Confidence threshold** | Only auto-trashes at 80%+ confidence |
+| **Whitelist** | Specified domains/senders always marked important (bypass LLM) |
+| **Undo** | Restore last trashed email + record correction for learning |
+| **Protected categories** | Financial, personal, and job opportunity emails shielded from auto-trash |
+| **Age-aware rules** | Emails 90d–1y: protect work/financial/personal. Emails 1y+: protect financial/personal only |
+| **Prompt injection defense** | System prompt rejects injected instructions; 13 injection patterns monitored |
+| **Trash, not delete** | Emails go to Gmail Trash — recoverable for 30 days |
+| **Fallback API key** | Automatic failover when primary Gemini key hits quota limits |
+| **Action audit log** | Every trash action logged with timestamp, sender, classification, and reasoning |
+
+## Project Structure
+
+```
+email-agent/
+├── agent.py                 # Main agent — CLI, orchestration, action loop
+├── classifier.py            # Gemini-based email classifier (batch + single)
+├── gmail_client.py          # Gmail API client (OAuth2, fetch, trash, undo)
+├── config.py                # Settings from environment variables
+├── context_store.py         # Persistent sender history + correction learning
+├── guardrails_validator.py  # 7-step LLM output validation with auto-fix
+├── opik_integration.py      # Observability — traces, spans, feedback scores
+├── pii_scrubber.py          # PII removal before sending to Opik
+├── optimize_prompt.py       # Prompt optimization via Opik evaluate()
+├── run_evals.py             # Evaluation runner (security + guardrails + promptfoo)
+├── evals/
+│   ├── security_tests.py    # 12 adversarial security tests (Garak-style)
+│   ├── promptfoo.yaml       # 19 classification accuracy tests
+│   └── prompt_template.txt  # Prompt template for promptfoo
+├── test_spans.py            # Opik span verification script
+├── web_app.py               # Flask web UI with natural language input
+└── web_ui/index.html        # Static web UI (GitHub Actions trigger)
+```
 
 ## Quick Start
 
 ```bash
 cd email-agent
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# Configure (see Setup section below)
-# Then authenticate with Gmail
+# Configure .env (see env.example)
+# Authenticate with Gmail
 python agent.py auth
 
-# Run in dry-run mode (safe preview)
+# Dry run — safe preview
 python agent.py run
 
-# Run for real
+# Process for real
 python agent.py run --no-dry-run
-```
 
-## Setup
+# Clean up old emails
+python agent.py run --batch 20 --older-than 6m --no-dry-run
 
-### 1. Get Gemini API Key
-
-1. Go to [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
-2. Click **Create API Key**
-3. Copy the key
-
-### 2. Set Up Gmail API (Google Cloud Console)
-
-#### Create Project & Enable API
-
-1. Go to [console.cloud.google.com](https://console.cloud.google.com/)
-2. Create a new project (e.g., "Email Agent")
-3. Go to **APIs & Services** → **Library**
-4. Search for **Gmail API** → Click **Enable**
-
-#### Configure OAuth Consent Screen
-
-1. Go to **APIs & Services** → **OAuth consent screen**
-2. Fill in basic info:
-   - App name: `Email Agent`
-   - User support email: your email
-   - Developer contact: your email
-3. Add yourself as a **Test User**
-4. Save
-
-#### Create OAuth Credentials
-
-1. Go to **APIs & Services** → **Credentials**
-2. Click **+ Create Credentials** → **OAuth client ID**
-3. Application type: **Desktop app**
-4. Name: `Email Agent`
-5. Click **Create**
-6. Download JSON or copy Client ID & Secret
-
-#### Create credentials.json
-
-Create `credentials.json` in the project folder:
-
-```json
-{
-  "installed": {
-    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-    "client_secret": "YOUR_CLIENT_SECRET",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "redirect_uris": ["http://localhost"]
-  }
-}
-```
-
-### 3. Create .env File
-
-Create `.env` in the project folder:
-
-```bash
-# Google Gemini API Key (Required)
-GEMINI_API_KEY=your-gemini-api-key-here
-
-# Agent Behavior
-DRY_RUN=true
-CONFIDENCE_THRESHOLD=0.8
-BATCH_SIZE=10
-
-# Whitelist - emails from these are ALWAYS kept (comma-separated)
-WHITELIST_DOMAINS=yourcompany.com,importantnewsletter.com
-WHITELIST_SENDERS=
-```
-
-### 4. Authenticate with Gmail
-
-```bash
-python agent.py auth
-```
-
-A browser will open for Google OAuth. Sign in and authorize the app.
-
-## Usage
-
-### Preview Mode (Dry Run)
-
-```bash
-python agent.py run
-```
-
-Shows what would happen without actually trashing emails.
-
-### Process Emails for Real
-
-```bash
-python agent.py run --no-dry-run
-```
-
-### Process Specific Number of Emails
-
-```bash
-python agent.py run --batch 20 --no-dry-run
-```
-
-### Undo Last Trash
-
-```bash
+# Undo last trash
 python agent.py undo
-```
 
-### View Action History
+# Run evaluations
+python run_evals.py
 
-```bash
-python agent.py history
+# Run prompt optimization
+python optimize_prompt.py --compare
 ```
 
 ## Example Output
 
 ```
-╔══════════════════════════════════════════════════════════════════════════════╗
-║ 🤖 Email Agent                                                               ║
-║ Autonomous email classification and organization                             ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║ 🤖 Email Agent                                              ║
+║ Autonomous email classification and organization            ║
+╚══════════════════════════════════════════════════════════════╝
 Logged in as: user@gmail.com
 
 📬 Fetching unread emails...
@@ -183,151 +191,38 @@ Found 5 unread email(s)
 
 🤖 Classifying emails...
 
-                        📧 Email Classification Results                         
-╭─────────────┬─────────────┬──────────────┬─────────────┬────────────┬────────╮
-│ From        │ Subject     │ Category     │ Importance  │ Confidence │ Action │
-├─────────────┼─────────────┼──────────────┼─────────────┼────────────┼────────┤
-│ Boss        │ Q4 Review   │ work         │ ✓ Important │        95% │ KEEP   │
-│ Corp Bank   │ Your stmt   │ financial    │ ✓ Important │        90% │ KEEP   │
-│ NewsletterX │ Weekly tips │ whitelisted  │ ✓ Important │       100% │ KEEP   │
-│ Deals.com   │ 50% off!    │ promotional  │ ✗ Not       │        90% │ TRASH  │
-│             │             │              │ Important   │            │        │
-│ SocialApp   │ New likes   │ notification │ ✗ Not       │        85% │ TRASH  │
-│             │             │              │ Important   │            │        │
-╰─────────────┴─────────────┴──────────────┴─────────────┴────────────┴────────╯
+                    📧 Email Classification Results
+╭─────────────┬──────────────┬──────────────┬────────────┬────────╮
+│ From        │ Subject      │ Importance   │ Confidence │ Action │
+├─────────────┼──────────────┼──────────────┼────────────┼────────┤
+│ Boss        │ Q4 Review    │ ✓ Important  │        95% │ KEEP   │
+│ Corp Bank   │ Your stmt    │ ✓ Important  │        90% │ KEEP   │
+│ Newsletter  │ Weekly tips  │ ✓ Important  │       100% │ KEEP   │
+│ Deals.com   │ 50% off!     │ ✗ Not Imp.   │        90% │ TRASH  │
+│ SocialApp   │ New likes    │ ✗ Not Imp.   │        85% │ TRASH  │
+╰─────────────┴──────────────┴──────────────┴────────────┴────────╯
 
   🗑️ Trashed: 50% off!...
   🗑️ Trashed: New likes...
 
-╭───────────────────────────────── 📊 Summary ─────────────────────────────────╮
-│ 📧 Processed: 5                                                              │
-│ ✅ Important: 3                                                              │
-│ ❌ Not Important: 2                                                          │
-│ 🗑️  Trashed: 2                                                               │
-│ 📥 Kept: 3                                                                   │
-╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────── 📊 Summary ────────────────────╮
+│ 📧 Processed: 5                                     │
+│ ✅ Important: 3                                     │
+│ ❌ Not Important: 2                                 │
+│ 🗑️  Trashed: 2                                      │
+│ 📥 Kept: 3                                          │
+╰─────────────────────────────────────────────────────╯
 ```
 
-## Configuration
+## Tech Stack
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_API_KEY` | (required) | Google Gemini API key |
-| `CLASSIFIER_MODEL` | `gemini-2.0-flash` | Gemini model for classification |
-| `BATCH_SIZE` | `10` | Number of emails to process per run |
-| `DRY_RUN` | `true` | If true, preview only (no actual trashing) |
-| `CONFIDENCE_THRESHOLD` | `0.8` | Minimum confidence (0-1) to auto-trash |
-| `WHITELIST_DOMAINS` | `` | Comma-separated domains always marked important |
-| `WHITELIST_SENDERS` | `` | Comma-separated emails always marked important |
-
-### Whitelist
-
-Emails from whitelisted domains/senders bypass AI classification entirely and are always marked as **Important (100% confidence)**.
-
-```bash
-WHITELIST_DOMAINS=yourcompany.com,trustedsite.com
-WHITELIST_SENDERS=boss@example.com,important@partner.com
-```
-
-### Classification Criteria
-
-The default criteria classifies as **Not Important**:
-- Marketing newsletters and promotions
-- Job alert notifications
-- Social media notifications
-- Professional event invitations and meetups
-- Calendar notifications for past events
-- Online course promotions
-- Loyalty program statements
-
-Classified as **Important**:
-- Direct messages from colleagues/clients
-- Future meeting invitations
-- Financial bills requiring action
-- Security alerts
-- Personal messages
-
-You can customize these in `config.py`.
-
-## Project Structure
-
-```
-email-agent/
-├── agent.py             # Main CLI application
-├── gmail_client.py      # Gmail API wrapper
-├── classifier.py        # Gemini-based email classifier
-├── config.py            # Configuration management
-├── requirements.txt     # Python dependencies
-├── credentials.json     # Gmail OAuth credentials (you create)
-├── token.json           # OAuth token (auto-created)
-├── .env                 # Your API keys and settings (you create)
-├── agent_actions.json   # Action log (auto-created)
-└── README.md
-```
-
-## Free Tier Limits
-
-Gemini free tier has **~20 requests per day per model**. To maximize:
-
-1. Use whitelist for known-important senders (no API call needed)
-2. Run with smaller batches: `--batch 10`
-3. Quota resets daily at midnight Pacific time
-
-For unlimited usage, enable billing at [aistudio.google.com](https://aistudio.google.com) (pay-as-you-go is very cheap).
-
-## Safety Features
-
-| Feature | Description |
-|---------|-------------|
-| **Dry Run Mode** | Default mode - shows preview without taking action |
-| **Confidence Threshold** | Only auto-trashes when 80%+ confident |
-| **Whitelist** | Specified domains/senders always kept |
-| **Undo** | Restore the last trashed email |
-| **Action Log** | All actions logged with timestamps |
-| **Trash (not Delete)** | Emails go to Trash, recoverable for 30 days |
-
-## Why This Is a True AI Agent
-
-Unlike simple chatbots, this is a genuine **autonomous agent**:
-
-| Agent Trait | Implementation |
-|-------------|----------------|
-| **Perceives Environment** | Reads emails from Gmail API |
-| **Reasons** | LLM analyzes content, sender, context |
-| **Makes Decisions** | Classifies as important/not important |
-| **Takes Actions** | Moves emails to trash autonomously |
-| **Has Goals** | Keep inbox clean and organized |
-| **Maintains State** | Logs actions, supports undo |
-
-## Troubleshooting
-
-### "credentials.json not found"
-Create the file manually (see Setup section) or download from Google Cloud Console.
-
-### "Token has been expired or revoked"
-```bash
-rm token.json
-python agent.py auth
-```
-
-### Rate limit errors (429)
-You've hit the free tier daily limit. Wait until tomorrow or enable billing.
-
-### Classification seems wrong
-1. Add the sender to whitelist
-2. Adjust criteria in `config.py`
-3. Increase `CONFIDENCE_THRESHOLD` for more conservative behavior
-
-## Security Notes
-
-- OAuth tokens stored locally in `token.json`
-- Never commit `credentials.json`, `token.json`, or `.env` to git
-- Email content is sent to Google Gemini for classification
-- All secrets loaded from environment variables
-- Emails are trashed (recoverable), not permanently deleted
+- **LLM**: Google Gemini 2.0 Flash
+- **Email**: Gmail API (OAuth2)
+- **Observability**: Opik (traces, spans, experiments, feedback scores)
+- **Evals**: Opik evaluate(), Promptfoo, custom security suite
+- **Framework**: Python 3.10+, Typer (CLI), Flask (web), Rich (terminal UI)
+- **Config**: Pydantic Settings + dotenv
 
 ## License
 
-MIT License
+MIT
