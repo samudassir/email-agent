@@ -15,7 +15,7 @@ on:
       dry_run:
         description: 'Dry run mode (true/false)'
         required: false
-        default: 'true'
+        default: 'false'
       older_than:
         description: 'Only process emails older than (e.g., 1y, 6m, 30d, 2w). Leave empty for latest emails.'
         required: false
@@ -49,7 +49,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           CLASSIFIER_MODEL: 'gemini-2.5-flash-lite'
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           BATCH_SIZE: ${{ github.event.inputs.batch_size || '20' }}
           CONFIDENCE_THRESHOLD: '0.8'
           WHITELIST_DOMAINS: ${{ secrets.WHITELIST_DOMAINS || '' }}
@@ -66,9 +66,9 @@ jobs:
             OLDER_THAN_FLAG="--older-than $OLDER_THAN"
           fi
           
-          DRY_RUN_FLAG=""
-          if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
-            DRY_RUN_FLAG="--no-dry-run"
+          DRY_RUN_FLAG="--no-dry-run"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG=""
           fi
           
           python agent.py run --batch $BATCH_SIZE $DRY_RUN_FLAG $OLDER_THAN_FLAG
