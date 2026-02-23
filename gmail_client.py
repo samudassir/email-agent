@@ -12,6 +12,7 @@ from email.utils import parsedate_to_datetime
 
 import structlog
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -59,37 +60,64 @@ class GmailClient:
         """Authenticate with Gmail using OAuth2."""
         creds = None
         
-        # Check for existing token
         if os.path.exists(self.settings.gmail_token_file):
             creds = Credentials.from_authorized_user_file(
                 self.settings.gmail_token_file, SCOPES
             )
         
-        # If no valid credentials, authenticate
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                logger.info("Refreshing expired credentials")
-                creds.refresh(Request())
+                try:
+                    logger.info("Refreshing expired credentials")
+                    creds.refresh(Request())
+                except RefreshError as e:
+                    logger.warning("Token refresh failed, re-authenticating", error=str(e))
+                    creds = self._run_oauth_flow()
             else:
-                if not os.path.exists(self.settings.gmail_credentials_file):
-                    raise FileNotFoundError(
-                        f"OAuth credentials file not found: {self.settings.gmail_credentials_file}\n"
-                        "Please download credentials.json from Google Cloud Console."
-                    )
-                
-                logger.info("Starting OAuth flow - browser will open for authentication")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.settings.gmail_credentials_file, SCOPES
-                )
-                creds = flow.run_local_server(port=0)
+                creds = self._run_oauth_flow()
             
-            # Save credentials for next run
-            with open(self.settings.gmail_token_file, "w") as token:
-                token.write(creds.to_json())
-            logger.info("Credentials saved", token_file=self.settings.gmail_token_file)
+            self._save_token(creds)
         
+        self._creds = creds
         self.service = build("gmail", "v1", credentials=creds)
         logger.info("Gmail API authenticated successfully")
+    
+    def _run_oauth_flow(self) -> Credentials:
+        """Run the full OAuth2 consent flow."""
+        if not os.path.exists(self.settings.gmail_credentials_file):
+            raise FileNotFoundError(
+                f"OAuth credentials file not found: {self.settings.gmail_credentials_file}\n"
+                "Please download credentials.json from Google Cloud Console."
+            )
+        
+        logger.info("Starting OAuth flow - browser will open for authentication")
+        flow = InstalledAppFlow.from_client_secrets_file(
+            self.settings.gmail_credentials_file, SCOPES
+        )
+        return flow.run_local_server(port=0)
+    
+    def _save_token(self, creds: Credentials):
+        """Persist credentials to disk so subsequent runs can reuse them."""
+        with open(self.settings.gmail_token_file, "w") as token:
+            token.write(creds.to_json())
+        logger.info("Credentials saved", token_file=self.settings.gmail_token_file)
+    
+    def _refresh_and_retry(self, func, *args, **kwargs):
+        """Re-authenticate and retry an API call once on auth failure."""
+        try:
+            self._creds.refresh(Request())
+        except RefreshError:
+            logger.warning("Refresh failed during retry, running full re-auth")
+            self._creds = self._run_oauth_flow()
+        
+        self._save_token(self._creds)
+        self.service = build("gmail", "v1", credentials=self._creds)
+        return func(*args, **kwargs)
+    
+    def _persist_token_if_refreshed(self):
+        """Save token to disk if the library auto-refreshed it in memory."""
+        if self._creds and self._creds.valid and self._creds.token:
+            self._save_token(self._creds)
     
     def _parse_email_address(self, header_value: str) -> tuple[str, str]:
         """Parse email header to extract name and email address."""
@@ -141,40 +169,45 @@ class GmailClient:
                        Supported units: y (years), m (months), d (days), w (weeks)
         """
         try:
-            # Build search query
-            query = "is:unread in:inbox"
-            if older_than:
-                query += f" older_than:{older_than}"
-                logger.info("Filtering emails older than", older_than=older_than)
-            
-            # Search for unread emails in inbox
-            results = self.service.users().messages().list(
-                userId="me",
-                q=query,
-                maxResults=max_results
-            ).execute()
-            
-            messages = results.get("messages", [])
-            
-            if not messages:
-                logger.info("No unread emails found")
+            return self._get_unread_emails_inner(max_results, older_than)
+        except (HttpError, RefreshError) as e:
+            if isinstance(e, HttpError) and e.resp.status != 401:
+                logger.error("Failed to fetch emails", error=str(e))
                 return []
-            
-            emails = []
-            for msg_ref in messages:
-                try:
-                    email = self._fetch_email_details(msg_ref["id"])
-                    if email:
-                        emails.append(email)
-                except HttpError as e:
-                    logger.warning("Failed to fetch email details", error=str(e), message_id=msg_ref["id"])
-            
-            logger.info("Fetched unread emails", count=len(emails))
-            return emails
-            
-        except HttpError as e:
-            logger.error("Failed to fetch emails", error=str(e))
+            logger.warning("Auth expired during fetch, refreshing", error=str(e))
+            return self._refresh_and_retry(self._get_unread_emails_inner, max_results, older_than)
+    
+    def _get_unread_emails_inner(self, max_results: int, older_than: str | None) -> list[Email]:
+        query = "is:unread in:inbox"
+        if older_than:
+            query += f" older_than:{older_than}"
+            logger.info("Filtering emails older than", older_than=older_than)
+        
+        results = self.service.users().messages().list(
+            userId="me",
+            q=query,
+            maxResults=max_results
+        ).execute()
+        
+        self._persist_token_if_refreshed()
+        
+        messages = results.get("messages", [])
+        
+        if not messages:
+            logger.info("No unread emails found")
             return []
+        
+        emails = []
+        for msg_ref in messages:
+            try:
+                email = self._fetch_email_details(msg_ref["id"])
+                if email:
+                    emails.append(email)
+            except HttpError as e:
+                logger.warning("Failed to fetch email details", error=str(e), message_id=msg_ref["id"])
+        
+        logger.info("Fetched unread emails", count=len(emails))
+        return emails
     
     def _fetch_email_details(self, message_id: str) -> Optional[Email]:
         """Fetch full details of a single email."""
@@ -220,84 +253,115 @@ class GmailClient:
     def trash_email(self, email_id: str) -> bool:
         """Move an email to trash."""
         try:
-            self.service.users().messages().trash(
-                userId="me",
-                id=email_id
-            ).execute()
-            logger.info("Email moved to trash", email_id=email_id)
-            return True
-        except HttpError as e:
-            logger.error("Failed to trash email", error=str(e), email_id=email_id)
-            return False
+            return self._trash_email_inner(email_id)
+        except (HttpError, RefreshError) as e:
+            if isinstance(e, HttpError) and e.resp.status != 401:
+                logger.error("Failed to trash email", error=str(e), email_id=email_id)
+                return False
+            logger.warning("Auth expired during trash, refreshing", error=str(e))
+            return self._refresh_and_retry(self._trash_email_inner, email_id)
+    
+    def _trash_email_inner(self, email_id: str) -> bool:
+        self.service.users().messages().trash(
+            userId="me",
+            id=email_id
+        ).execute()
+        self._persist_token_if_refreshed()
+        logger.info("Email moved to trash", email_id=email_id)
+        return True
     
     def untrash_email(self, email_id: str) -> bool:
         """Restore an email from trash."""
         try:
-            self.service.users().messages().untrash(
-                userId="me",
-                id=email_id
-            ).execute()
-            logger.info("Email restored from trash", email_id=email_id)
-            return True
-        except HttpError as e:
-            logger.error("Failed to untrash email", error=str(e), email_id=email_id)
-            return False
+            return self._untrash_email_inner(email_id)
+        except (HttpError, RefreshError) as e:
+            if isinstance(e, HttpError) and e.resp.status != 401:
+                logger.error("Failed to untrash email", error=str(e), email_id=email_id)
+                return False
+            logger.warning("Auth expired during untrash, refreshing", error=str(e))
+            return self._refresh_and_retry(self._untrash_email_inner, email_id)
+    
+    def _untrash_email_inner(self, email_id: str) -> bool:
+        self.service.users().messages().untrash(
+            userId="me",
+            id=email_id
+        ).execute()
+        self._persist_token_if_refreshed()
+        logger.info("Email restored from trash", email_id=email_id)
+        return True
     
     def mark_as_read(self, email_id: str) -> bool:
         """Mark an email as read."""
         try:
-            self.service.users().messages().modify(
-                userId="me",
-                id=email_id,
-                body={"removeLabelIds": ["UNREAD"]}
-            ).execute()
-            logger.info("Email marked as read", email_id=email_id)
-            return True
-        except HttpError as e:
-            logger.error("Failed to mark as read", error=str(e), email_id=email_id)
-            return False
+            return self._mark_as_read_inner(email_id)
+        except (HttpError, RefreshError) as e:
+            if isinstance(e, HttpError) and e.resp.status != 401:
+                logger.error("Failed to mark as read", error=str(e), email_id=email_id)
+                return False
+            logger.warning("Auth expired during mark_as_read, refreshing", error=str(e))
+            return self._refresh_and_retry(self._mark_as_read_inner, email_id)
+    
+    def _mark_as_read_inner(self, email_id: str) -> bool:
+        self.service.users().messages().modify(
+            userId="me",
+            id=email_id,
+            body={"removeLabelIds": ["UNREAD"]}
+        ).execute()
+        self._persist_token_if_refreshed()
+        logger.info("Email marked as read", email_id=email_id)
+        return True
     
     def add_label(self, email_id: str, label_name: str) -> bool:
         """Add a label to an email (creates label if needed)."""
         try:
-            # Try to find existing label
-            labels_result = self.service.users().labels().list(userId="me").execute()
-            label_id = None
-            
-            for label in labels_result.get("labels", []):
-                if label["name"].lower() == label_name.lower():
-                    label_id = label["id"]
-                    break
-            
-            # Create label if not exists
-            if not label_id:
-                new_label = self.service.users().labels().create(
-                    userId="me",
-                    body={"name": label_name, "labelListVisibility": "labelShow", "messageListVisibility": "show"}
-                ).execute()
-                label_id = new_label["id"]
-                logger.info("Created new label", label_name=label_name)
-            
-            # Add label to email
-            self.service.users().messages().modify(
+            return self._add_label_inner(email_id, label_name)
+        except (HttpError, RefreshError) as e:
+            if isinstance(e, HttpError) and e.resp.status != 401:
+                logger.error("Failed to add label", error=str(e), email_id=email_id)
+                return False
+            logger.warning("Auth expired during add_label, refreshing", error=str(e))
+            return self._refresh_and_retry(self._add_label_inner, email_id, label_name)
+    
+    def _add_label_inner(self, email_id: str, label_name: str) -> bool:
+        labels_result = self.service.users().labels().list(userId="me").execute()
+        label_id = None
+        
+        for label in labels_result.get("labels", []):
+            if label["name"].lower() == label_name.lower():
+                label_id = label["id"]
+                break
+        
+        if not label_id:
+            new_label = self.service.users().labels().create(
                 userId="me",
-                id=email_id,
-                body={"addLabelIds": [label_id]}
+                body={"name": label_name, "labelListVisibility": "labelShow", "messageListVisibility": "show"}
             ).execute()
-            
-            logger.info("Label added to email", email_id=email_id, label=label_name)
-            return True
-            
-        except HttpError as e:
-            logger.error("Failed to add label", error=str(e), email_id=email_id)
-            return False
+            label_id = new_label["id"]
+            logger.info("Created new label", label_name=label_name)
+        
+        self.service.users().messages().modify(
+            userId="me",
+            id=email_id,
+            body={"addLabelIds": [label_id]}
+        ).execute()
+        
+        self._persist_token_if_refreshed()
+        logger.info("Label added to email", email_id=email_id, label=label_name)
+        return True
     
     def get_user_email(self) -> str:
         """Get the authenticated user's email address."""
         try:
-            profile = self.service.users().getProfile(userId="me").execute()
-            return profile.get("emailAddress", "")
-        except HttpError as e:
-            logger.error("Failed to get user profile", error=str(e))
-            return ""
+            return self._get_user_email_inner()
+        except (HttpError, RefreshError) as e:
+            if isinstance(e, HttpError) and e.resp.status != 401:
+                logger.error("Failed to get user profile", error=str(e))
+                return ""
+            logger.warning("Auth expired during get_user_email, refreshing", error=str(e))
+            return self._refresh_and_retry(self._get_user_email_inner)
+    
+    def _get_user_email_inner(self) -> str:
+        profile = self.service.users().getProfile(userId="me").execute()
+        self._persist_token_if_refreshed()
+        return profile.get("emailAddress", "")
 
