@@ -300,8 +300,17 @@
                 <p class="status-message" id="statusMessage">Waiting...</p>
             </div>
             
-            <div style="margin-top: 1rem; text-align: center;">
+            <div style="margin-top: 1rem; text-align: center; display: flex; gap: 0.5rem; justify-content: center;">
                 <button class="btn btn-secondary" onclick="showSetup()">⚙️ Settings</button>
+                <button class="btn btn-secondary" onclick="reauthGmail()">🔑 Re-authenticate Gmail</button>
+            </div>
+            
+            <div class="status-section" id="reauthStatus">
+                <div class="status-header">
+                    <span>Gmail Re-auth</span>
+                    <span class="status-badge" id="reauthBadge">Ready</span>
+                </div>
+                <p class="status-message" id="reauthMessage"></p>
             </div>
         </div>
         
@@ -425,6 +434,46 @@
             
             btn.disabled = false;
             btn.innerHTML = 'Run Email Agent';
+        }
+        
+        async function reauthGmail() {
+            const owner = localStorage.getItem('gh_owner');
+            const repo = localStorage.getItem('gh_repo');
+            const token = localStorage.getItem('gh_token');
+            
+            if (!owner || !repo || !token) {
+                alert('Please complete setup first (GitHub repo + token).');
+                showSetup();
+                return;
+            }
+            
+            const status = document.getElementById('reauthStatus');
+            const badge = document.getElementById('reauthBadge');
+            const message = document.getElementById('reauthMessage');
+            
+            status.classList.add('visible');
+            badge.className = 'status-badge status-pending';
+            badge.textContent = 'Starting';
+            message.textContent = 'Redirecting to Google for Gmail authorization...';
+            
+            try {
+                const res = await fetch('/api/auth/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gh_token: token, gh_owner: owner, gh_repo: repo })
+                });
+                
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Failed to start auth');
+                }
+                
+                window.location.href = data.url;
+            } catch (err) {
+                badge.className = 'status-badge status-error';
+                badge.textContent = 'Error';
+                message.textContent = err.message;
+            }
         }
         
         // Initialize

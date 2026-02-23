@@ -5,6 +5,7 @@ Handles reading emails and performing actions (trash, label, etc.)
 
 import base64
 import os
+import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -82,19 +83,48 @@ class GmailClient:
         self.service = build("gmail", "v1", credentials=creds)
         logger.info("Gmail API authenticated successfully")
     
+    @staticmethod
+    def _is_headless() -> bool:
+        """Detect environments where no browser is available."""
+        if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+            return True
+        if os.name == "posix" and not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+            return True
+        try:
+            webbrowser.get()
+        except webbrowser.Error:
+            return True
+        return False
+    
     def _run_oauth_flow(self) -> Credentials:
-        """Run the full OAuth2 consent flow."""
+        """Run the full OAuth2 consent flow. Requires a browser."""
         if not os.path.exists(self.settings.gmail_credentials_file):
             raise FileNotFoundError(
                 f"OAuth credentials file not found: {self.settings.gmail_credentials_file}\n"
                 "Please download credentials.json from Google Cloud Console."
             )
         
+        if self._is_headless():
+            raise RuntimeError(
+                "Gmail refresh token is expired or revoked and no browser is available "
+                "to re-authenticate.\n"
+                "Fix: use the 'Re-authenticate Gmail' button on the Vercel dashboard, "
+                "or run 'python agent.py auth' locally and update the GOOGLE_TOKEN_JSON "
+                "GitHub secret with the new token.json contents."
+            )
+        
         logger.info("Starting OAuth flow - browser will open for authentication")
         flow = InstalledAppFlow.from_client_secrets_file(
             self.settings.gmail_credentials_file, SCOPES
         )
-        return flow.run_local_server(port=0)
+        try:
+            return flow.run_local_server(port=0)
+        except webbrowser.Error as e:
+            raise RuntimeError(
+                f"Could not open browser for OAuth: {e}\n"
+                "Fix: run 'python agent.py auth' on a machine with a browser, "
+                "then copy the updated token.json here."
+            ) from e
     
     def _save_token(self, creds: Credentials):
         """Persist credentials to disk so subsequent runs can reuse them."""
