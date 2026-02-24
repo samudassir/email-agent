@@ -104,16 +104,15 @@ module.exports = async (req, res) => {
   }
 
   // Build token.json matching google-auth-oauthlib format
+  // Omit `scopes` — google-auth sends them in refresh requests and Google
+  // rejects them with invalid_scope for Web-type clients. Without the field,
+  // refresh works and returns the originally-granted scopes automatically.
   const tokenJson = JSON.stringify({
     token: tokens.access_token,
     refresh_token: tokens.refresh_token,
     token_uri: "https://oauth2.googleapis.com/token",
     client_id: clientId,
     client_secret: clientSecret,
-    scopes: [
-      "https://www.googleapis.com/auth/gmail.readonly",
-      "https://www.googleapis.com/auth/gmail.modify",
-    ],
     universe_domain: "googleapis.com",
     account: "",
     expiry: new Date(Date.now() + tokens.expires_in * 1000)
